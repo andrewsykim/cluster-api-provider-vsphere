@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,9 +17,11 @@ limitations under the License.
 package vsphere
 
 import (
-	vsphereutils "sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/utils"
 	clustercommon "sigs.k8s.io/cluster-api/pkg/apis/cluster/common"
 	clusterv1 "sigs.k8s.io/cluster-api/pkg/apis/cluster/v1alpha1"
+
+	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/context"
+	vsphereutils "sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/utils"
 )
 
 const ProviderName = "vsphere"
@@ -38,9 +40,17 @@ func NewDeploymentClient() *DeploymentClient {
 }
 
 func (d *DeploymentClient) GetIP(cluster *clusterv1.Cluster, _ *clusterv1.Machine) (string, error) {
-	return vsphereutils.GetIP(cluster, nil)
+	ctx, err := context.NewClusterContext(&context.ClusterContextParams{Cluster: cluster})
+	if err != nil {
+		return "", err
+	}
+	return vsphereutils.GetControlPlaneEndpoint(ctx)
 }
 
 func (d *DeploymentClient) GetKubeConfig(cluster *clusterv1.Cluster, _ *clusterv1.Machine) (string, error) {
-	return vsphereutils.GetKubeConfig(cluster, nil)
+	ctx, err := context.NewClusterContext(&context.ClusterContextParams{Cluster: cluster})
+	if err != nil {
+		return "", err
+	}
+	return vsphereutils.GetKubeConfig(ctx)
 }

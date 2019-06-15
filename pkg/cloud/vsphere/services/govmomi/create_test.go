@@ -14,10 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package govmomi
+package govmomi_test
 
 import (
-	"context"
 	"crypto/tls"
 	"log"
 	"reflect"
@@ -35,7 +34,9 @@ import (
 
 	vsphereconfigv1 "sigs.k8s.io/cluster-api-provider-vsphere/pkg/apis/vsphereproviderconfig/v1alpha1"
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/constants"
+	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/context"
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/services/certificates"
+	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/services/govmomi"
 )
 
 func TestCreate(t *testing.T) {
@@ -106,7 +107,14 @@ func TestCreate(t *testing.T) {
 		},
 	}
 
-	if err := certificates.ReconcileCertificates(cluster); err != nil {
+	clusterContext, err := context.NewClusterContext(&context.ClusterContextParams{
+		Cluster: cluster,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := certificates.ReconcileCertificates(clusterContext); err != nil {
 		t.Fatal(err)
 	}
 
@@ -171,18 +179,12 @@ func TestCreate(t *testing.T) {
 		},
 	}
 
-	p := &Provisioner{
-		clusterV1alpha1: nil,
-		lister:          nil,
-		eventRecorder:   nil,
-		sessioncache:    make(map[string]interface{}),
-		k8sClient:       nil,
+	machineContext, err := context.NewMachineContextFromClusterContext(clusterContext, machine)
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	DefaultSSHPublicKeyFile = "create_test.go" // any file will avoid the k8s client path in GetSSHPublicKey()
-
-	err = p.Create(context.Background(), cluster, machine, "")
-	if err != nil {
+	if err := govmomi.Create(machineContext, ""); err != nil {
 		log.Fatal(err)
 	}
 

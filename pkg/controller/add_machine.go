@@ -20,37 +20,40 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog"
-	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere"
 	"sigs.k8s.io/cluster-api/pkg/client/clientset_generated/clientset"
 	"sigs.k8s.io/cluster-api/pkg/controller/machine"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+
+	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere"
+	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/record"
 )
 
 func init() {
 	// AddToManagerFuncs is a list of functions to create controllers and add them to a manager.
 	AddToManagerFuncs = append(AddToManagerFuncs, func(m manager.Manager) error {
 		factory := getSharedInformerFactory(m)
-		informer := factory.Cluster().V1alpha1()
+		lister := factory.Cluster().V1alpha1()
 
 		client, err := clientset.NewForConfig(m.GetConfig())
 		if err != nil {
 			klog.Fatalf("Failed to create clientset: %v", err)
 		}
 
-		machineClientSet, err := kubernetes.NewForConfig(
+		clientSet, err := kubernetes.NewForConfig(
 			rest.AddUserAgent(m.GetConfig(), "machine-controller-manager"),
 		)
 		if err != nil {
 			klog.Fatalf("Failed to create client: %v", err)
 		}
 
-		machineEventRecorder, err := createRecorder(machineClientSet, "machine-controller-manager")
+		recorder, err := createRecorder(clientSet, "machine-controller-manager")
 		if err != nil {
 			klog.Fatalf("Could not create vSphere event recorder: %v", err)
 		}
 
-		//TODO: remove need for client
-		actuator, err := vsphere.NewMachineActuator(m, client.ClusterV1alpha1(), machineClientSet, informer, machineEventRecorder)
+		record.InitFromRecorder(recorder)
+
+		actuator, err := vsphere.NewMachineActuator(client.ClusterV1alpha1(), clientSet.CoreV1(), lister)
 		if err != nil {
 			klog.Fatalf("Could not create vSphere machine actuator: %v", err)
 		}

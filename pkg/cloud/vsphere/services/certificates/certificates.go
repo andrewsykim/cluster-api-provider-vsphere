@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -33,10 +33,9 @@ import (
 
 	"github.com/pkg/errors"
 	"k8s.io/client-go/tools/clientcmd/api"
-	"k8s.io/klog"
-	clusterv1 "sigs.k8s.io/cluster-api/pkg/apis/cluster/v1alpha1"
 
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/apis/vsphereproviderconfig/v1alpha1"
+	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/context"
 )
 
 const (
@@ -70,53 +69,42 @@ type Config struct {
 }
 
 // ReconcileCertificates generate certificates if none exists.
-func ReconcileCertificates(cluster *clusterv1.Cluster) error {
+func ReconcileCertificates(ctx *context.ClusterContext) error {
+	ctx.Logger.V(2).Info("reconciling certificates")
 
-	clusterConfig, err := v1alpha1.ClusterConfigFromProviderSpec(&cluster.Spec.ProviderSpec)
-	if err != nil {
-		return errors.Wrapf(err,
-			"unable to get cluster provider spec for cluster while reconciling certificates %s=%s %s=%s",
-			"cluster-namespace", cluster.Namespace,
-			"cluster-name", cluster.Name)
-	}
-
-	klog.V(2).Infof("Reconciling certificates %s=%s %s=%s",
-		"cluster-name", cluster.Name,
-		"cluster-namespace", cluster.Namespace)
-
-	if !clusterConfig.CAKeyPair.HasCertAndKey() {
-		klog.V(2).Infof("Generating keypair for %s=%s", "user", clusterCA)
-		clusterCAKeyPair, err := generateCACert(&clusterConfig.CAKeyPair, clusterCA)
+	if !ctx.ClusterConfig.CAKeyPair.HasCertAndKey() {
+		ctx.Logger.V(2).Info("Generating keypair for", "user", clusterCA)
+		clusterCAKeyPair, err := generateCACert(&ctx.ClusterConfig.CAKeyPair, clusterCA)
 		if err != nil {
 			return errors.Wrapf(err, "Failed to generate certs for %q", clusterCA)
 		}
-		clusterConfig.CAKeyPair = clusterCAKeyPair
+		ctx.ClusterConfig.CAKeyPair = clusterCAKeyPair
 	}
 
-	if !clusterConfig.EtcdCAKeyPair.HasCertAndKey() {
-		klog.V(2).Infof("Generating keypair %s=%s", "user", etcdCA)
-		etcdCAKeyPair, err := generateCACert(&clusterConfig.EtcdCAKeyPair, etcdCA)
+	if !ctx.ClusterConfig.EtcdCAKeyPair.HasCertAndKey() {
+		ctx.Logger.V(2).Info("Generating keypair", "user", etcdCA)
+		etcdCAKeyPair, err := generateCACert(&ctx.ClusterConfig.EtcdCAKeyPair, etcdCA)
 		if err != nil {
 			return errors.Wrapf(err, "Failed to generate certs for %q", etcdCA)
 		}
-		clusterConfig.EtcdCAKeyPair = etcdCAKeyPair
+		ctx.ClusterConfig.EtcdCAKeyPair = etcdCAKeyPair
 	}
-	if !clusterConfig.FrontProxyCAKeyPair.HasCertAndKey() {
-		klog.V(2).Infof("Generating keypair %s=%s", "user", frontProxyCA)
-		fpCAKeyPair, err := generateCACert(&clusterConfig.FrontProxyCAKeyPair, frontProxyCA)
+	if !ctx.ClusterConfig.FrontProxyCAKeyPair.HasCertAndKey() {
+		ctx.Logger.V(2).Info("Generating keypair", "user", frontProxyCA)
+		fpCAKeyPair, err := generateCACert(&ctx.ClusterConfig.FrontProxyCAKeyPair, frontProxyCA)
 		if err != nil {
 			return errors.Wrapf(err, "Failed to generate certs for %q", frontProxyCA)
 		}
-		clusterConfig.FrontProxyCAKeyPair = fpCAKeyPair
+		ctx.ClusterConfig.FrontProxyCAKeyPair = fpCAKeyPair
 	}
 
-	if !clusterConfig.SAKeyPair.HasCertAndKey() {
-		klog.V(2).Infof("Generating service account keys %s=%s", "user", serviceAccount)
-		saKeyPair, err := generateServiceAccountKeys(&clusterConfig.SAKeyPair, serviceAccount)
+	if !ctx.ClusterConfig.SAKeyPair.HasCertAndKey() {
+		ctx.Logger.V(2).Info("Generating service account keys", "user", serviceAccount)
+		saKeyPair, err := generateServiceAccountKeys(&ctx.ClusterConfig.SAKeyPair, serviceAccount)
 		if err != nil {
 			return errors.Wrapf(err, "Failed to generate keyPair for %q", serviceAccount)
 		}
-		clusterConfig.SAKeyPair = saKeyPair
+		ctx.ClusterConfig.SAKeyPair = saKeyPair
 	}
 
 	return nil

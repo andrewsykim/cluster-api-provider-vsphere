@@ -438,6 +438,8 @@ spec:
           type: string
         metadata:
           type: object
+        ready:
+          type: boolean
   version: v1alpha1
 status:
   acceptedNames:

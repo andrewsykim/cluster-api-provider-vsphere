@@ -28,6 +28,8 @@ import (
 type VsphereClusterProviderStatus struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Ready bool `json:"ready,omitempty"`
 }
 
 func init() {

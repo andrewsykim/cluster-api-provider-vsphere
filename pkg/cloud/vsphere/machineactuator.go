@@ -1,5 +1,5 @@
 /*
-Copyright 2017 The Kubernetes Authors.
+Copyright 2019 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,32 +17,24 @@ limitations under the License.
 package vsphere
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"reflect"
+	goctx "context"
 	"time"
 
 	"github.com/pkg/errors"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	// "k8s.io/apimachinery/pkg/types"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/record"
-	"k8s.io/klog"
+	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	clusterv1 "sigs.k8s.io/cluster-api/pkg/apis/cluster/v1alpha1"
-	"sigs.k8s.io/cluster-api/pkg/client/clientset_generated/clientset"
 	clusterv1alpha1 "sigs.k8s.io/cluster-api/pkg/client/clientset_generated/clientset/typed/cluster/v1alpha1"
-	"sigs.k8s.io/cluster-api/pkg/client/informers_generated/externalversions/cluster/v1alpha1"
-	capierr "sigs.k8s.io/cluster-api/pkg/controller/error"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/patch"
 
-	vsphereconfigv1 "sigs.k8s.io/cluster-api-provider-vsphere/pkg/apis/vsphereproviderconfig/v1alpha1"
+	v1alpha1 "sigs.k8s.io/cluster-api/pkg/client/informers_generated/externalversions/cluster/v1alpha1"
+	capierr "sigs.k8s.io/cluster-api/pkg/controller/error"
+
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/constants"
-	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/provisioner/govmomi"
+	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/context"
+	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/services/govmomi"
 	vsphereutils "sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/utils"
+	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/record"
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/tokens"
 )
 
@@ -50,322 +42,198 @@ const (
 	defaultTokenTTL = 10 * time.Minute
 )
 
+// MachineActuator is responsible for maintaining the Cluster objects.
 type MachineActuator struct {
-	clusterV1alpha1  clusterv1alpha1.ClusterV1alpha1Interface
-	lister           v1alpha1.Interface
-	controllerClient client.Client
-	provisioner      *govmomi.Provisioner
-	eventRecorder    record.EventRecorder
+	client     clusterv1alpha1.ClusterV1alpha1Interface
+	coreClient corev1.CoreV1Interface
+	lister     v1alpha1.Interface
 }
 
+// NewMachineActuator creates the instance for the MachineActuator
 func NewMachineActuator(
-	m manager.Manager,
-	clusterV1alpha1 clusterv1alpha1.ClusterV1alpha1Interface,
-	k8sClient kubernetes.Interface,
-	lister v1alpha1.Interface,
-	eventRecorder record.EventRecorder) (*MachineActuator, error) {
-
-	clusterClient, err := clientset.NewForConfig(m.GetConfig())
-	if err != nil {
-		klog.Fatalf("Invalid API configuration for kubeconfig-control: %v", err)
-	}
-
-	provisioner, err := govmomi.New(clusterClient.ClusterV1alpha1(), k8sClient, lister, eventRecorder)
-	if err != nil {
-		return nil, err
-	}
+	client clusterv1alpha1.ClusterV1alpha1Interface,
+	coreClient corev1.CoreV1Interface,
+	lister v1alpha1.Interface) (*MachineActuator, error) {
 
 	return &MachineActuator{
-		clusterV1alpha1:  clusterV1alpha1,
-		lister:           lister,
-		controllerClient: m.GetClient(),
-		provisioner:      provisioner,
-		eventRecorder:    eventRecorder,
+		client:     client,
+		coreClient: coreClient,
+		lister:     lister,
 	}, nil
 }
 
+// Create creates a new machine.
 func (a *MachineActuator) Create(
-	ctx context.Context,
+	parentCtx goctx.Context,
 	cluster *clusterv1.Cluster,
 	machine *clusterv1.Machine) (result error) {
 
-	if cluster == nil {
-		return errors.Errorf(
-			"missing cluster for machine %s/%s",
-			machine.Namespace, machine.Name)
-	}
-
-	machineRole := vsphereutils.GetMachineRole(machine)
-	if machineRole == "" {
-		return errors.Errorf(
-			"unable to get machine role while creating machine %s=%s %s=%s %s=%s %s=%s",
-			"cluster-namespace", cluster.Namespace,
-			"cluster-name", cluster.Name,
-			"machine-namespace", machine.Namespace,
-			"machine-name", machine.Name)
-	}
-
-	klog.V(2).Infof("Creating machine in cluster %s=%s %s=%s %s=%s %s=%s %s=%s",
-		"cluster-namespace", cluster.Namespace,
-		"cluster-name", cluster.Name,
-		"machine-namespace", machine.Namespace,
-		"machine-name", machine.Name,
-		"machine-role", machineRole)
-
-	clusterConfig, err := vsphereconfigv1.ClusterConfigFromCluster(cluster)
+	ctx, err := context.NewMachineContext(
+		&context.MachineContextParams{
+			ClusterContextParams: context.ClusterContextParams{
+				Context:    parentCtx,
+				Cluster:    cluster,
+				Client:     a.client,
+				CoreClient: a.coreClient,
+				Lister:     a.lister,
+			},
+			Machine: machine,
+		})
 	if err != nil {
-		return errors.Wrapf(err,
-			"unable to get cluster config while creating machine %s=%s %s=%s %s=%s %s=%s",
-			"cluster-namespace", cluster.Namespace,
-			"cluster-name", cluster.Name,
-			"machine-namespace", machine.Namespace,
-			"machine-name", machine.Name)
+		return err
 	}
 
-	if !clusterConfig.CAKeyPair.HasCertAndKey() {
-		klog.V(4).Infof("cluster config is missing pki toolchain, requeue machine %s=%s %s=%s %s=%s %s=%s",
-			"cluster-namespace", cluster.Namespace,
-			"cluster-name", cluster.Name,
-			"machine-namespace", machine.Namespace,
-			"machine-name", machine.Name)
-		return &capierr.RequeueAfterError{RequeueAfter: constants.RequeueAfterSeconds}
-	}
-
-	machineCopy := machine.DeepCopy()
 	defer func() {
-		if err := a.patchMachine(machine, machineCopy); err != nil {
-			if result == nil {
-				result = err
-			} else {
-				result = errors.Wrap(result, err.Error())
-			}
+		if result == nil {
+			record.Eventf(ctx.Machine, "CreateSuccess", "created machine %q", ctx)
+		} else {
+			record.Warnf(ctx.Machine, "CreateFailure", "failed to create machine %q: %v", ctx, result)
 		}
 	}()
 
-	controlPlaneMachines, err := vsphereutils.GetControlPlaneMachinesForCluster(cluster, a.lister)
+	machineRole := ctx.Role()
+	if machineRole == "" {
+		return errors.Errorf("unable to get machine role while creating machine %q", ctx)
+	}
+
+	ctx.Logger.V(2).Info("creating machine", "role", machineRole)
+	defer ctx.Patch()
+
+	if !ctx.ClusterConfig.CAKeyPair.HasCertAndKey() {
+		ctx.Logger.V(2).Info("cluster config is missing pki toolchain, requeue machine")
+		return &capierr.RequeueAfterError{RequeueAfter: constants.RequeueAfterSeconds}
+	}
+
+	controlPlaneMachines, err := vsphereutils.GetControlPlaneMachinesForCluster(ctx.ClusterContext)
 	if err != nil {
-		return errors.Wrapf(err,
-			"unable to get control plane machines while creating machine %s=%s %s=%s %s=%s %s=%s",
-			"cluster-namespace", cluster.Namespace,
-			"cluster-name", cluster.Name,
-			"machine-namespace", machine.Namespace,
-			"machine-name", machine.Name)
+		return errors.Wrapf(err, "unable to get control plane machines while creating machine %q", ctx)
 	}
 
 	// Init the control plane by creating this machine.
-	if machineRole == "controlplane" && len(controlPlaneMachines) == 1 {
-		if err := a.provisioner.Create(ctx, cluster, machine, ""); err != nil {
-			return errors.Wrapf(err,
-				"failed to create machine as initial member of the control plane %s=%s %s=%s %s=%s %s=%s",
-				"cluster-namespace", cluster.Namespace,
-				"cluster-name", cluster.Name,
-				"machine-namespace", machine.Namespace,
-				"machine-name", machine.Name)
+	if machineRole == context.ControlPlaneRole && len(controlPlaneMachines) == 1 {
+		if err := govmomi.Create(ctx, ""); err != nil {
+			return errors.Wrapf(err, "failed to create machine as initial member of the control plane %q", ctx)
 		}
 		return nil
 	}
 
 	// Join the existing cluster.
-	online, _, err := vsphereutils.GetControlPlaneStatus(cluster, a.lister)
+	online, _, _ := vsphereutils.GetControlPlaneStatus(ctx.ClusterContext)
 	if !online {
-		msg := fmt.Sprintf("unable to join machine to control plane until it is online %s=%s %s=%s %s=%s %s=%s",
-			"cluster-namespace", cluster.Namespace,
-			"cluster-name", cluster.Name,
-			"machine-namespace", machine.Namespace,
-			"machine-name", machine.Name)
-		if err != nil {
-			// Log the error wrapped with the message since we don't return
-			// the full error, only the cause (which may be a Requeue error)
-			klog.V(2).Info(errors.Wrap(err, msg))
-			return errors.Cause(err)
-		}
-		klog.V(2).Info(msg)
+		ctx.Logger.V(2).Info("unable to join machine to control plane until it is online")
 		return &capierr.RequeueAfterError{RequeueAfter: time.Minute * 1}
 	}
 
 	// Get a Kubernetes client for the cluster.
-	kubeClient, err := vsphereutils.GetKubeClientForCluster(cluster, a.lister)
+	kubeClient, err := vsphereutils.GetKubeClientForCluster(ctx.ClusterContext)
 	if err != nil {
-		return errors.Wrapf(err,
-			"failed to get kubeclient while creating machine %s=%s %s=%s %s=%s %s=%s",
-			"cluster-namespace", cluster.Namespace,
-			"cluster-name", cluster.Name,
-			"machine-namespace", machine.Namespace,
-			"machine-name", machine.Name)
+		return errors.Wrapf(err, "failed to get kubeclient while creating machine %q", ctx)
 	}
 
 	// Get a new bootstrap token used to join this machine to the cluster.
 	token, err := tokens.NewBootstrap(kubeClient, defaultTokenTTL)
 	if err != nil {
-		return errors.Wrapf(err,
-			"unable to generate boostrap token for joining machine to cluster %s=%s %s=%s %s=%s %s=%s",
-			"cluster-namespace", cluster.Namespace,
-			"cluster-name", cluster.Name,
-			"machine-namespace", machine.Namespace,
-			"machine-name", machine.Name)
+		return errors.Wrapf(err, "unable to generate boostrap token for joining machine to cluster %q", ctx)
 	}
 
 	// Create the machine and join it to the cluster.
-	if err := a.provisioner.Create(ctx, cluster, machine, token); err != nil {
-		return errors.Wrapf(err,
-			"failed to create machine and join it to the cluster %s=%s %s=%s %s=%s %s=%s",
-			"cluster-namespace", cluster.Namespace,
-			"cluster-name", cluster.Name,
-			"machine-namespace", machine.Namespace,
-			"machine-name", machine.Name)
+	if err := govmomi.Create(ctx, token); err != nil {
+		return errors.Wrapf(err, "failed to create machine and join it to the cluster %q", ctx)
 	}
 
 	return nil
 }
 
-func (a *MachineActuator) Delete(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine) (result error) {
-	klog.V(2).Infof("Deleting machine in cluster %s=%s %s=%s %s=%s %s=%s",
-		"cluster-namespace", cluster.Namespace,
-		"cluster-name", cluster.Name,
-		"machine-namespace", machine.Namespace,
-		"machine-name", machine.Name)
+// Delete removes a machine.
+func (a *MachineActuator) Delete(
+	parentCtx goctx.Context,
+	cluster *clusterv1.Cluster,
+	machine *clusterv1.Machine) (result error) {
 
-	machineCopy := machine.DeepCopy()
+	ctx, err := context.NewMachineContext(
+		&context.MachineContextParams{
+			ClusterContextParams: context.ClusterContextParams{
+				Context:    parentCtx,
+				Cluster:    cluster,
+				Client:     a.client,
+				CoreClient: a.coreClient,
+				Lister:     a.lister,
+			},
+			Machine: machine,
+		})
+	if err != nil {
+		return err
+	}
+
 	defer func() {
-		if err := a.patchMachine(machine, machineCopy); err != nil {
-			if result == nil {
-				result = err
-			} else {
-				result = errors.Wrap(result, err.Error())
-			}
+		if result == nil {
+			record.Eventf(ctx.Machine, "DeleteSuccess", "deleted machine %q", ctx)
+		} else {
+			record.Warnf(ctx.Machine, "DeleteFailure", "failed to delete machine %q: %v", ctx, result)
 		}
 	}()
 
-	return a.provisioner.Delete(ctx, cluster, machine)
+	ctx.Logger.V(2).Info("deleting machine")
+	defer ctx.Patch()
+
+	return govmomi.Delete(ctx)
 }
 
-func (a *MachineActuator) Update(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine) (result error) {
-	klog.V(2).Infof("Updating machine in cluster %s=%s %s=%s %s=%s %s=%s",
-		"cluster-namespace", cluster.Namespace,
-		"cluster-name", cluster.Name,
-		"machine-namespace", machine.Namespace,
-		"machine-name", machine.Name)
+// Update updates a machine from the backend platform's information.
+func (a *MachineActuator) Update(
+	parentCtx goctx.Context,
+	cluster *clusterv1.Cluster,
+	machine *clusterv1.Machine) (result error) {
 
-	machineCopy := machine.DeepCopy()
+	ctx, err := context.NewMachineContext(
+		&context.MachineContextParams{
+			ClusterContextParams: context.ClusterContextParams{
+				Context:    parentCtx,
+				Cluster:    cluster,
+				Client:     a.client,
+				CoreClient: a.coreClient,
+				Lister:     a.lister,
+			},
+			Machine: machine,
+		})
+	if err != nil {
+		return err
+	}
+
 	defer func() {
-		if err := a.patchMachine(machine, machineCopy); err != nil {
-			if result == nil {
-				result = err
-			} else {
-				result = errors.Wrap(result, err.Error())
-			}
+		if result == nil {
+			record.Eventf(ctx.Machine, "UpdateSuccess", "updated machine %q", ctx)
+		} else {
+			record.Warnf(ctx.Machine, "UpdateFailure", "failed to update machine %q: %v", ctx, result)
 		}
 	}()
 
-	return a.provisioner.Update(ctx, cluster, machine)
+	ctx.Logger.V(2).Info("updating machine")
+	defer ctx.Patch()
+
+	return govmomi.Update(ctx)
 }
 
-func (a *MachineActuator) Exists(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine) (bool, error) {
-	return a.provisioner.Exists(ctx, cluster, machine)
-}
+// Exists returns a flag indicating whether or not a machine exists.
+func (a *MachineActuator) Exists(
+	parentCtx goctx.Context,
+	cluster *clusterv1.Cluster,
+	machine *clusterv1.Machine) (ok bool, result error) {
 
-func (a *MachineActuator) patchMachine(
-	machine, machineCopy *clusterv1.Machine) error {
-
-	machineClient := a.clusterV1alpha1.Machines(machine.Namespace)
-
-	machineConfig, err := vsphereconfigv1.MachineConfigFromMachine(machine)
+	ctx, err := context.NewMachineContext(
+		&context.MachineContextParams{
+			ClusterContextParams: context.ClusterContextParams{
+				Context:    parentCtx,
+				Cluster:    cluster,
+				Client:     a.client,
+				CoreClient: a.coreClient,
+				Lister:     a.lister,
+			},
+			Machine: machine,
+		})
 	if err != nil {
-		return errors.Wrapf(err,
-			"unable to get machine provider spec for machine while patching machine %s=%s %s=%s",
-			"machine-namespace", machine.Namespace,
-			"machine-name", machine.Name)
+		return false, err
 	}
 
-	machineStatus, err := vsphereconfigv1.MachineStatusFromMachine(machine)
-	if err != nil {
-		return errors.Wrapf(err,
-			"unable to get machine provider status for machine while patching machine %s=%s %s=%s",
-			"machine-namespace", machine.Namespace,
-			"machine-name", machine.Name)
-	}
-
-	ext, err := vsphereconfigv1.EncodeMachineSpec(machineConfig)
-	if err != nil {
-		return errors.Wrap(err, "failed encoding machine spec")
-	}
-	newStatus, err := vsphereconfigv1.EncodeMachineStatus(machineStatus)
-	if err != nil {
-		return errors.Wrap(err, "failed encoding machine status")
-	}
-	ext.Object = nil
-	newStatus.Object = nil
-
-	machine.Spec.ProviderSpec.Value = ext
-
-	// Build a patch and marshal that patch to something the client will understand.
-	p, err := patch.NewJSONPatch(machineCopy, machine)
-	if err != nil {
-		return errors.Wrap(err, "failed to create new JSONPatch")
-	}
-
-	// Do not update Machine if nothing has changed
-	if len(p) != 0 {
-		pb, err := json.MarshalIndent(p, "", "  ")
-		if err != nil {
-			return errors.Wrap(err, "failed to json marshal patch")
-		}
-
-		klog.Infof(
-			"generated json patch for machine %s=%s %s=%s %s=%v",
-			"machine-namespace", machine.Namespace,
-			"machine-name", machine.Name,
-			"json-patch", string(pb))
-
-		//result, err := machineClient.Patch(machine.Name, types.JSONPatchType, pb)
-		result, err := machineClient.Update(machine)
-		if err != nil {
-			a.eventRecorder.Eventf(
-				machine, corev1.EventTypeWarning,
-				"UpdateFailure",
-				"failed to update machine config %s=%s %s=%s %s=%v",
-				"machine-namespace", machine.Namespace,
-				"machine-name", machine.Name,
-				"error", err)
-			return errors.Wrap(err, "failed to patch machine")
-		}
-
-		a.eventRecorder.Eventf(
-			machine, corev1.EventTypeNormal,
-			"UpdateSuccess",
-			"updated machine config %s=%s %s=%s",
-			"machine-namespace", machine.Namespace,
-			"machine-name", machine.Name)
-
-		// Keep the resource version updated so the status update can succeed
-		machine.ResourceVersion = result.ResourceVersion
-	}
-
-	machine.Status.ProviderStatus = newStatus
-
-	if !reflect.DeepEqual(machine.Status, machineCopy.Status) {
-		klog.V(1).Infof(
-			"updating machine status %s=%s %s=%s",
-			"machine-namespace", machine.Namespace,
-			"machine-name", machine.Name)
-		if _, err := machineClient.UpdateStatus(machine); err != nil {
-			a.eventRecorder.Eventf(
-				machine, corev1.EventTypeWarning,
-				"UpdateFailure",
-				"failed to update machine status %s=%s %s=%s %s=%v",
-				"machine-namespace", machine.Namespace,
-				"machine-name", machine.Name,
-				"error", err)
-			return errors.Wrap(err, "failed to update machine status")
-		}
-	}
-
-	a.eventRecorder.Eventf(
-		machine, corev1.EventTypeNormal,
-		"UpdateSuccess",
-		"updated machine status %s=%s %s=%s",
-		"machine-namespace", machine.Namespace,
-		"machine-name", machine.Name)
-
-	return nil
+	return govmomi.Exists(ctx)
 }
