@@ -112,6 +112,7 @@ func NewClusterContext(params *ClusterContextParams) (*ClusterContext, error) {
 			return nil, errors.Wrapf(err, "improperly formatted secret %q for cluster %s/%s", secretName, params.Cluster.Namespace, params.Cluster.Name)
 		}
 		user, pass = string(user2), string(pass2)
+		logr.V(2).Info("found vSphere credentials")
 	}
 
 	return &ClusterContext{
@@ -121,7 +122,6 @@ func NewClusterContext(params *ClusterContextParams) (*ClusterContext, error) {
 		ClusterClient: clusterClient,
 		ClusterConfig: clusterConfig,
 		ClusterStatus: clusterStatus,
-		//Lister:        params.Lister,
 		Logger:        logr,
 		client:        params.Client,
 		machineClient: machineClient,

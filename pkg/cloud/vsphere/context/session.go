@@ -86,12 +86,16 @@ func getOrCreateCachedSession(ctx *MachineContext) (*Session, error) {
 
 	// Cache the session.
 	sessionCache[sessionKey] = session
+	ctx.Logger.V(2).Info("cached vSphere client session", "server", ctx.ClusterConfig.VsphereServer, "datacenter", datacenter)
 
 	return &session, nil
 }
 
 // FindByInstanceUUID finds an object by its instance UUID.
 func (s *Session) FindByInstanceUUID(ctx context.Context, instanceUUID string) (object.Reference, error) {
+	if s.Client == nil {
+		return nil, errors.New("vSphere client is not initialized")
+	}
 	si := object.NewSearchIndex(s.Client.Client)
 	findFlag := true
 	ref, err := si.FindByUuid(ctx, s.datacenter, instanceUUID, true, &findFlag)
