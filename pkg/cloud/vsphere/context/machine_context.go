@@ -23,6 +23,7 @@ import (
 	"regexp"
 
 	"github.com/pkg/errors"
+	"k8s.io/apimachinery/pkg/types"
 	clusterv1 "sigs.k8s.io/cluster-api/pkg/apis/cluster/v1alpha1"
 	client "sigs.k8s.io/cluster-api/pkg/client/clientset_generated/clientset/typed/cluster/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/patch"
@@ -178,8 +179,8 @@ func (c *MachineContext) Patch() error {
 		c.Logger.V(1).Info("patching machine")
 		c.Logger.V(6).Info("generated json patch for machine", "json-patch", string(pb))
 
-		//result, err := c.MachineClient.Patch(c.Machine.Name, types.JSONPatchType, pb)
-		result, err := c.MachineClient.Update(c.Machine)
+		result, err := c.MachineClient.Patch(c.Machine.Name, types.JSONPatchType, pb)
+		//result, err := c.MachineClient.Update(c.Machine)
 		if err != nil {
 			record.Warnf(c.Machine, updateFailure, "failed to update machine config %q: %v", c, err)
 			return errors.Wrapf(err, "failed to patch machine %q", c)
@@ -195,13 +196,11 @@ func (c *MachineContext) Patch() error {
 
 	if !reflect.DeepEqual(c.Machine.Status, c.MachineCopy.Status) {
 		c.Logger.V(1).Info("updating machine status")
-
 		if _, err := c.MachineClient.UpdateStatus(c.Machine); err != nil {
 			record.Warnf(c.Machine, updateFailure, "failed to update machine status for machine %q: %v", c, err)
 			return errors.Wrapf(err, "failed to update machine status for machine %q", c)
 		}
+		record.Eventf(c.Machine, updateSuccess, "updated machine status for machine %q", c)
 	}
-
-	record.Eventf(c.Machine, updateSuccess, "updated machine status for machine %q", c)
 	return nil
 }

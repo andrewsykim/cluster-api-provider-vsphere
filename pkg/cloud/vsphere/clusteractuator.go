@@ -19,7 +19,6 @@ package vsphere
 import (
 	"github.com/pkg/errors"
 
-	// "k8s.io/apimachinery/pkg/types"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/klog/klogr"
 	clusterv1 "sigs.k8s.io/cluster-api/pkg/apis/cluster/v1alpha1"

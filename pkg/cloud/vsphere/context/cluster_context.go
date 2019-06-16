@@ -27,6 +27,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/klog/klogr"
 	clusterv1 "sigs.k8s.io/cluster-api/pkg/apis/cluster/v1alpha1"
@@ -174,7 +175,7 @@ func (c *ClusterContext) Patch(getControlPlaneStatus GetControlPlaneStatusFunc) 
 		return errors.Wrapf(err, "failed to create new JSONPatch for cluster %q", c)
 	}
 
-	// Do not update Machine if nothing has changed
+	// Do not update Cluster if nothing has changed
 	if len(p) != 0 {
 		pb, err := json.MarshalIndent(p, "", "  ")
 		if err != nil {
@@ -184,8 +185,8 @@ func (c *ClusterContext) Patch(getControlPlaneStatus GetControlPlaneStatusFunc) 
 		c.Logger.V(1).Info("patching cluster")
 		c.Logger.V(6).Info("generated json patch for cluster", "json-patch", string(pb))
 
-		//result, err := c.ClusterClient.Patch(c.Cluster.Name, types.JSONPatchType, pb)
-		result, err := c.ClusterClient.Update(c.Cluster)
+		result, err := c.ClusterClient.Patch(c.Cluster.Name, types.JSONPatchType, pb)
+		//result, err := c.ClusterClient.Update(c.Cluster)
 		if err != nil {
 			record.Warnf(c.Cluster, updateFailure, "failed to update cluster config %q: %v", c, err)
 			return errors.Wrapf(err, "failed to patch cluster %q", c)
@@ -226,14 +227,13 @@ func (c *ClusterContext) Patch(getControlPlaneStatus GetControlPlaneStatusFunc) 
 
 	if !reflect.DeepEqual(c.Cluster.Status, c.ClusterCopy.Status) {
 		c.Logger.V(1).Info("updating cluster status")
-
 		if _, err := c.ClusterClient.UpdateStatus(c.Cluster); err != nil {
 			record.Warnf(c.Cluster, updateFailure, "failed to update cluster status for cluster %q: %v", c, err)
 			return errors.Wrapf(err, "failed to update cluster status for cluster %q", c)
 		}
+		record.Eventf(c.Cluster, updateSuccess, "updated cluster status for cluster %q", c)
 	}
 
-	record.Eventf(c.Cluster, updateSuccess, "updated cluster status for cluster %q", c)
 	return nil
 }
 
