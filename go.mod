@@ -2,7 +2,12 @@ module sigs.k8s.io/cluster-api-provider-vsphere
 
 go 1.12
 
-replace k8s.io/apimachinery => k8s.io/apimachinery v0.0.0-20181127025237-2b1284ed4c93
+replace (
+	github.com/go-logr/logr => github.com/go-logr/logr v0.1.0
+	github.com/go-logr/zapr => github.com/go-logr/zapr v0.1.0
+	k8s.io/apimachinery => k8s.io/apimachinery v0.0.0-20181127025237-2b1284ed4c93
+	k8s.io/klog => k8s.io/klog v0.2.0
+)
 
 require (
 	github.com/Azure/go-autorest/autorest v0.2.0 // indirect
@@ -10,7 +15,7 @@ require (
 	github.com/cenkalti/backoff v2.1.1+incompatible
 	github.com/evanphx/json-patch v4.2.0+incompatible // indirect
 	github.com/go-logr/logr v0.1.0
-	github.com/go-logr/zapr v0.1.1 // indirect
+	github.com/go-logr/zapr v0.1.0 // indirect
 	github.com/gogo/protobuf v1.2.1 // indirect
 	github.com/golang/groupcache v0.0.0-20190129154638-5b532d6fd5ef // indirect
 	github.com/google/btree v1.0.0 // indirect
