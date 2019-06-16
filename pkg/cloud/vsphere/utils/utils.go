@@ -40,10 +40,6 @@ import (
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/services/certificates"
 )
 
-const (
-	defaultBindPort = 6443
-)
-
 // byMachineCreatedTimestamp implements sort.Interface for []clusterv1.Machine
 // based on the machine's creation timestamp.
 type byMachineCreatedTimestamp []*clusterv1.Machine
@@ -126,7 +122,7 @@ func GetAPIServerBindPort(machineConfig *v1alpha1.VsphereMachineProviderConfig) 
 		}
 	}
 	if bindPort == 0 {
-		bindPort = defaultBindPort
+		bindPort = constants.DefaultBindPort
 	}
 	return bindPort
 }

@@ -147,7 +147,10 @@ func Create(ctx *context.MachineContext, bootstrapToken string) error {
 			ctx.Logger.V(2).Info("initializing a new cluster")
 
 			bindPort := ctx.MachineConfig.KubeadmConfiguration.Init.LocalAPIEndpoint.BindPort
-			certSans := []string{"localIPV4Lookup"}
+			if bindPort == 0 {
+				bindPort = constants.DefaultBindPort
+			}
+			certSans := []string{localIPV4Lookup}
 			if v := ctx.ClusterConfig.ClusterConfiguration.ControlPlaneEndpoint; v != "" {
 				host, _, err := net.SplitHostPort(v)
 				if err != nil {
@@ -186,6 +189,7 @@ func Create(ctx *context.MachineContext, bootstrapToken string) error {
 						//kubeadm.WithKubeletExtraArgs(map[string]string{"cloud-provider": cloudProvider}),
 					),
 				),
+				kubeadm.WithInitLocalAPIEndpointAndPort(localIPV4Lookup, int(bindPort)),
 			)
 			initConfigYAML, err := kubeadm.ConfigurationToYAML(&ctx.MachineConfig.KubeadmConfiguration.Init)
 			if err != nil {

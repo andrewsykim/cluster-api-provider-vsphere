@@ -32,6 +32,14 @@ func SetInitConfigurationOptions(base *kubeadmv1beta1.InitConfiguration, opts ..
 	}
 }
 
+// WithInitLocalAPIEndpointAndPort sets the local advertise address and port the kube-apiserver will advertise it is listening on.
+func WithInitLocalAPIEndpointAndPort(endpoint string, port int) InitConfigurationOption {
+	return func(c *kubeadmv1beta1.InitConfiguration) {
+		c.LocalAPIEndpoint.AdvertiseAddress = endpoint
+		c.LocalAPIEndpoint.BindPort = int32(port)
+	}
+}
+
 // WithNodeRegistrationOptions will set the node registration options.
 func WithNodeRegistrationOptions(nro kubeadmv1beta1.NodeRegistrationOptions) InitConfigurationOption {
 	return func(c *kubeadmv1beta1.InitConfiguration) {

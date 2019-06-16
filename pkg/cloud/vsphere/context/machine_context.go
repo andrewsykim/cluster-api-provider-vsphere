@@ -64,6 +64,15 @@ func NewMachineContextFromClusterContext(
 		return nil, errors.Wrap(err, "failed to load machine provider config")
 	}
 
+	if machineConfig.KubeadmConfiguration.Init.LocalAPIEndpoint.BindPort == 0 {
+		machineConfig.KubeadmConfiguration.Init.LocalAPIEndpoint.BindPort = constants.DefaultBindPort
+	}
+	if cp := machineConfig.KubeadmConfiguration.Join.ControlPlane; cp != nil {
+		if cp.LocalAPIEndpoint.BindPort == 0 {
+			cp.LocalAPIEndpoint.BindPort = constants.DefaultBindPort
+		}
+	}
+
 	machineStatus, err := v1alpha1.MachineStatusFromMachine(machine)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to load machine provider status")
