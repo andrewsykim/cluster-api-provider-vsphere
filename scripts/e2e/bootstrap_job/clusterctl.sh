@@ -59,6 +59,9 @@ echo "test ${PROVIDER_COMPONENT_SPEC}"
     -v 6 
 
 ret=$?
+
+exit "${ret}"
+
 if [ "$ret" != 0 ]; then
    kubectl delete -f ./spec/"${PROVIDER_COMPONENT_SPEC}"
    exit "$ret"
