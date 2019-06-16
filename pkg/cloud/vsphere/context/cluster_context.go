@@ -27,12 +27,12 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/klog/klogr"
 	clusterv1 "sigs.k8s.io/cluster-api/pkg/apis/cluster/v1alpha1"
 	client "sigs.k8s.io/cluster-api/pkg/client/clientset_generated/clientset/typed/cluster/v1alpha1"
-	listerv1 "sigs.k8s.io/cluster-api/pkg/client/informers_generated/externalversions/cluster/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/patch"
 
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/apis/vsphereproviderconfig/v1alpha1"
@@ -46,7 +46,6 @@ type ClusterContextParams struct {
 	Cluster    *clusterv1.Cluster
 	Client     client.ClusterV1alpha1Interface
 	CoreClient corev1.CoreV1Interface
-	Lister     listerv1.Interface
 	Logger     logr.Logger
 }
 
@@ -58,9 +57,9 @@ type ClusterContext struct {
 	ClusterClient client.ClusterInterface
 	ClusterConfig *v1alpha1.VsphereClusterProviderConfig
 	ClusterStatus *v1alpha1.VsphereClusterProviderStatus
-	Lister        listerv1.Interface
 	Logger        logr.Logger
 	client        client.ClusterV1alpha1Interface
+	machineClient client.MachineInterface
 	user          string
 	pass          string
 }
@@ -74,8 +73,10 @@ func NewClusterContext(params *ClusterContextParams) (*ClusterContext, error) {
 	}
 
 	var clusterClient client.ClusterInterface
+	var machineClient client.MachineInterface
 	if params.Client != nil {
 		clusterClient = params.Client.Clusters(params.Cluster.Namespace)
+		machineClient = params.Client.Machines(params.Cluster.Namespace)
 	}
 
 	clusterConfig, err := v1alpha1.ClusterConfigFromCluster(params.Cluster)
@@ -120,9 +121,10 @@ func NewClusterContext(params *ClusterContextParams) (*ClusterContext, error) {
 		ClusterClient: clusterClient,
 		ClusterConfig: clusterConfig,
 		ClusterStatus: clusterStatus,
-		Lister:        params.Lister,
+		//Lister:        params.Lister,
 		Logger:        logr,
 		client:        params.Client,
+		machineClient: machineClient,
 		user:          user,
 		pass:          pass,
 	}, nil
@@ -147,6 +149,45 @@ func (c *ClusterContext) Pass() string {
 // enough information to login to the vSphere endpoint.
 func (c *ClusterContext) CanLogin() bool {
 	return c.ClusterConfig.VsphereServer != "" && c.user != ""
+}
+
+// GetMachineClient returns a new Machine client for this cluster.
+func (c *ClusterContext) GetMachineClient() client.MachineInterface {
+	if c.client != nil {
+		return c.client.Machines(c.Cluster.Namespace)
+	}
+	return nil
+}
+
+// GetMachines gets the machines in the cluster.
+func (c *ClusterContext) GetMachines() ([]*clusterv1.Machine, error) {
+	labelSet := labels.Set(map[string]string{
+		clusterv1.MachineClusterLabelName: c.Cluster.Name,
+	})
+	list, err := c.machineClient.List(metav1.ListOptions{LabelSelector: labelSet.AsSelector().String()})
+	if err != nil {
+		return nil, err
+	}
+	machines := make([]*clusterv1.Machine, len(list.Items))
+	for i := range list.Items {
+		machines[i] = &list.Items[i]
+	}
+	return machines, nil
+}
+
+// GetControlPlaneMachines returns the control plane machines for the cluster.
+func (c *ClusterContext) GetControlPlaneMachines() ([]*clusterv1.Machine, error) {
+	machines, err := c.GetMachines()
+	if err != nil {
+		return nil, err
+	}
+	controlPlaneMachines := []*clusterv1.Machine{}
+	for _, machine := range machines {
+		if role := GetMachineRole(machine); role == ControlPlaneRole {
+			controlPlaneMachines = append(controlPlaneMachines, machine)
+		}
+	}
+	return controlPlaneMachines, nil
 }
 
 // GetControlPlaneStatusFunc returns a flag indicating whether the control plane

@@ -24,13 +24,10 @@ import (
 	"os"
 	"sort"
 	"strconv"
-	"time"
 
-	"github.com/cenkalti/backoff"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog"
@@ -81,7 +78,7 @@ func GetControlPlaneEndpoint(ctx *context.ClusterContext) (string, error) {
 		return "", errors.Errorf("cluster client is nil while searching for control plane endpoint for cluster %q", ctx)
 	}
 
-	controlPlaneMachines, err := GetControlPlaneMachinesForCluster(ctx)
+	controlPlaneMachines, err := ctx.GetControlPlaneMachines()
 	if err != nil {
 		return "", errors.Wrapf(err, "unable to get control plane machines while searching for control plane endpoint for cluster %q", ctx)
 	}
@@ -208,28 +205,6 @@ func GetKubeClientForCluster(ctx *context.ClusterContext) (corev1.CoreV1Interfac
 	return corev1.NewForConfig(clientConfig)
 }
 
-// GetControlPlaneMachinesForCluster returns the control plane nodes for the given cluster
-func GetControlPlaneMachinesForCluster(ctx *context.ClusterContext) ([]*clusterv1.Machine, error) {
-	labelSet := labels.Set(map[string]string{
-		clusterv1.MachineClusterLabelName: ctx.Cluster.Name,
-	})
-	machines, err := ctx.Lister.Machines().Lister().List(labelSet.AsSelector())
-	if err != nil {
-		return nil, err
-	}
-	controlPlaneMachines := make([]*clusterv1.Machine, 0)
-	for _, machine := range machines {
-		machineCtx, err := context.NewMachineContextFromClusterContext(ctx, machine)
-		if err != nil {
-			return nil, errors.Wrapf(err, "unable to create machine context for %q while listing control plane machines for cluster %q", machine.Name, ctx)
-		}
-		if machineCtx.IsControlPlaneMember() {
-			controlPlaneMachines = append(controlPlaneMachines, machine)
-		}
-	}
-	return controlPlaneMachines, nil
-}
-
 // Just a temporary hack to grab a single range from the config.
 func GetSubnet(netRange clusterv1.NetworkRanges) string {
 	if len(netRange.CIDRBlocks) == 0 {
@@ -281,12 +256,4 @@ func GiBToByte(n int64) int64 {
 func IsValidUUID(str string) bool {
 	_, err := uuid.Parse(str)
 	return err == nil
-}
-
-func GetNextBackOff() time.Duration {
-	b := backoff.NewExponentialBackOff()
-	b.InitialInterval = constants.RequeueAfterSeconds
-	b.MaxInterval = constants.RequeueAfterSeconds + 10*time.Second
-	b.Reset()
-	return b.NextBackOff()
 }

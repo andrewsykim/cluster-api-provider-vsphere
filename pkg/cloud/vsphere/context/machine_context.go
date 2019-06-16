@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"regexp"
 
 	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -106,34 +105,9 @@ func (c *MachineContext) String() string {
 	return fmt.Sprintf("%s/%s/%s", c.Cluster.Namespace, c.Cluster.Name, c.Machine.Name)
 }
 
-// MachineRole is the role of a Machine
-type MachineRole string
-
-const (
-	// ControlPlaneRole indicates a machine is a member of the control plane.
-	ControlPlaneRole MachineRole = "controlplane"
-
-	// NodeRole indicates a machine is a member of the cluster.
-	NodeRole MachineRole = "node"
-)
-
 // Role returns the Machine's role.
 func (c *MachineContext) Role() MachineRole {
-	role := c.Machine.Labels["set"]
-	if ok, _ := regexp.MatchString(`(?i)controlplane|master`, role); ok {
-		return ControlPlaneRole
-	}
-	if ok, _ := regexp.MatchString(`(?i)(?:worker-)?node`, role); ok {
-		return NodeRole
-	}
-	role = c.Machine.Labels["node-type"]
-	if ok, _ := regexp.MatchString(`(?i)controlplane|master`, role); ok {
-		return ControlPlaneRole
-	}
-	if ok, _ := regexp.MatchString(`(?i)(?:worker-)?node`, role); ok {
-		return NodeRole
-	}
-	return ""
+	return GetMachineRole(c.Machine)
 }
 
 // IPAddr returns the machine's IP address.

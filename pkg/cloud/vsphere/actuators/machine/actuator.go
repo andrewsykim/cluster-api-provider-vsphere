@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package vsphere
+package machine
 
 import (
 	goctx "context"
@@ -22,18 +22,16 @@ import (
 
 	"github.com/pkg/errors"
 
-	// "k8s.io/apimachinery/pkg/types"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/klog/klogr"
 	clusterv1 "sigs.k8s.io/cluster-api/pkg/apis/cluster/v1alpha1"
-	clusterv1alpha1 "sigs.k8s.io/cluster-api/pkg/client/clientset_generated/clientset/typed/cluster/v1alpha1"
-	v1alpha1 "sigs.k8s.io/cluster-api/pkg/client/informers_generated/externalversions/cluster/v1alpha1"
-	capierr "sigs.k8s.io/cluster-api/pkg/controller/error"
+	clientv1 "sigs.k8s.io/cluster-api/pkg/client/clientset_generated/clientset/typed/cluster/v1alpha1"
+	clustererr "sigs.k8s.io/cluster-api/pkg/controller/error"
 
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/constants"
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/context"
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/services/govmomi"
-	vsphereutils "sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/utils"
+	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/utils"
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/record"
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/tokens"
 )
@@ -42,28 +40,25 @@ const (
 	defaultTokenTTL = 10 * time.Minute
 )
 
-// MachineActuator is responsible for maintaining the Cluster objects.
-type MachineActuator struct {
-	client     clusterv1alpha1.ClusterV1alpha1Interface
+// Actuator is responsible for maintaining the Machine objects.
+type Actuator struct {
+	client     clientv1.ClusterV1alpha1Interface
 	coreClient corev1.CoreV1Interface
-	lister     v1alpha1.Interface
 }
 
-// NewMachineActuator creates the instance for the MachineActuator
-func NewMachineActuator(
-	client clusterv1alpha1.ClusterV1alpha1Interface,
-	coreClient corev1.CoreV1Interface,
-	lister v1alpha1.Interface) (*MachineActuator, error) {
+// NewActuator returns a new instance of Actuator.
+func NewActuator(
+	client clientv1.ClusterV1alpha1Interface,
+	coreClient corev1.CoreV1Interface) *Actuator {
 
-	return &MachineActuator{
+	return &Actuator{
 		client:     client,
 		coreClient: coreClient,
-		lister:     lister,
-	}, nil
+	}
 }
 
 // Create creates a new machine.
-func (a *MachineActuator) Create(
+func (a *Actuator) Create(
 	parentCtx goctx.Context,
 	cluster *clusterv1.Cluster,
 	machine *clusterv1.Machine) (result error) {
@@ -75,7 +70,6 @@ func (a *MachineActuator) Create(
 				Cluster:    cluster,
 				Client:     a.client,
 				CoreClient: a.coreClient,
-				Lister:     a.lister,
 				Logger:     klogr.New().WithName("[machine-actuator]"),
 			},
 			Machine: machine,
@@ -102,10 +96,10 @@ func (a *MachineActuator) Create(
 
 	if !ctx.ClusterConfig.CAKeyPair.HasCertAndKey() {
 		ctx.Logger.V(2).Info("cluster config is missing pki toolchain, requeue machine")
-		return &capierr.RequeueAfterError{RequeueAfter: constants.RequeueAfterSeconds}
+		return &clustererr.RequeueAfterError{RequeueAfter: constants.RequeueAfterSeconds}
 	}
 
-	controlPlaneMachines, err := vsphereutils.GetControlPlaneMachinesForCluster(ctx.ClusterContext)
+	controlPlaneMachines, err := ctx.GetControlPlaneMachines()
 	if err != nil {
 		return errors.Wrapf(err, "unable to get control plane machines while creating machine %q", ctx)
 	}
@@ -119,14 +113,14 @@ func (a *MachineActuator) Create(
 	}
 
 	// Join the existing cluster.
-	online, _, _ := vsphereutils.GetControlPlaneStatus(ctx.ClusterContext)
+	online, _, _ := utils.GetControlPlaneStatus(ctx.ClusterContext)
 	if !online {
 		ctx.Logger.V(2).Info("unable to join machine to control plane until it is online")
-		return &capierr.RequeueAfterError{RequeueAfter: time.Minute * 1}
+		return &clustererr.RequeueAfterError{RequeueAfter: time.Minute * 1}
 	}
 
 	// Get a Kubernetes client for the cluster.
-	kubeClient, err := vsphereutils.GetKubeClientForCluster(ctx.ClusterContext)
+	kubeClient, err := utils.GetKubeClientForCluster(ctx.ClusterContext)
 	if err != nil {
 		return errors.Wrapf(err, "failed to get kubeclient while creating machine %q", ctx)
 	}
@@ -146,7 +140,7 @@ func (a *MachineActuator) Create(
 }
 
 // Delete removes a machine.
-func (a *MachineActuator) Delete(
+func (a *Actuator) Delete(
 	parentCtx goctx.Context,
 	cluster *clusterv1.Cluster,
 	machine *clusterv1.Machine) (result error) {
@@ -158,7 +152,6 @@ func (a *MachineActuator) Delete(
 				Cluster:    cluster,
 				Client:     a.client,
 				CoreClient: a.coreClient,
-				Lister:     a.lister,
 			},
 			Machine: machine,
 		})
@@ -181,7 +174,7 @@ func (a *MachineActuator) Delete(
 }
 
 // Update updates a machine from the backend platform's information.
-func (a *MachineActuator) Update(
+func (a *Actuator) Update(
 	parentCtx goctx.Context,
 	cluster *clusterv1.Cluster,
 	machine *clusterv1.Machine) (result error) {
@@ -193,7 +186,6 @@ func (a *MachineActuator) Update(
 				Cluster:    cluster,
 				Client:     a.client,
 				CoreClient: a.coreClient,
-				Lister:     a.lister,
 			},
 			Machine: machine,
 		})
@@ -216,7 +208,7 @@ func (a *MachineActuator) Update(
 }
 
 // Exists returns a flag indicating whether or not a machine exists.
-func (a *MachineActuator) Exists(
+func (a *Actuator) Exists(
 	parentCtx goctx.Context,
 	cluster *clusterv1.Cluster,
 	machine *clusterv1.Machine) (ok bool, result error) {
@@ -228,7 +220,6 @@ func (a *MachineActuator) Exists(
 				Cluster:    cluster,
 				Client:     a.client,
 				CoreClient: a.coreClient,
-				Lister:     a.lister,
 			},
 			Machine: machine,
 		})

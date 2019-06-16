@@ -12,7 +12,6 @@ replace (
 require (
 	github.com/Azure/go-autorest/autorest v0.2.0 // indirect
 	github.com/appscode/jsonpatch v0.0.0-20190108182946-7c0e3b262f30 // indirect
-	github.com/cenkalti/backoff v2.1.1+incompatible
 	github.com/evanphx/json-patch v4.2.0+incompatible // indirect
 	github.com/go-logr/logr v0.1.0
 	github.com/go-logr/zapr v0.1.0 // indirect
@@ -36,7 +35,6 @@ require (
 	github.com/pkg/errors v0.8.1
 	github.com/prometheus/client_golang v0.9.3 // indirect
 	github.com/spf13/cobra v0.0.4 // indirect
-	github.com/spf13/pflag v1.0.3
 	github.com/vmware/govmomi v0.20.1
 	go.uber.org/atomic v1.4.0 // indirect
 	go.uber.org/multierr v1.1.0 // indirect

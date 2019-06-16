@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package vsphere
+package cluster
 
 import (
 	"github.com/pkg/errors"
@@ -22,42 +22,37 @@ import (
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/klog/klogr"
 	clusterv1 "sigs.k8s.io/cluster-api/pkg/apis/cluster/v1alpha1"
-	clusterv1alpha1 "sigs.k8s.io/cluster-api/pkg/client/clientset_generated/clientset/typed/cluster/v1alpha1"
-	v1alpha1 "sigs.k8s.io/cluster-api/pkg/client/informers_generated/externalversions/cluster/v1alpha1"
+	clientv1 "sigs.k8s.io/cluster-api/pkg/client/clientset_generated/clientset/typed/cluster/v1alpha1"
 
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/context"
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/services/certificates"
-	vsphereutils "sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/utils"
+	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/utils"
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/record"
 )
 
-// ClusterActuator is responsible for maintaining the Cluster objects.
-type ClusterActuator struct {
-	client     clusterv1alpha1.ClusterV1alpha1Interface
+// Actuator is responsible for maintaining the Cluster objects.
+type Actuator struct {
+	client     clientv1.ClusterV1alpha1Interface
 	coreClient corev1.CoreV1Interface
-	lister     v1alpha1.Interface
 }
 
-// NewClusterActuator creates the instance for the ClusterActuator
-func NewClusterActuator(
-	client clusterv1alpha1.ClusterV1alpha1Interface,
-	coreClient corev1.CoreV1Interface,
-	lister v1alpha1.Interface) (*ClusterActuator, error) {
+// NewActuator returns a new instance of Actuator.
+func NewActuator(
+	client clientv1.ClusterV1alpha1Interface,
+	coreClient corev1.CoreV1Interface) *Actuator {
 
-	return &ClusterActuator{
+	return &Actuator{
 		client:     client,
 		coreClient: coreClient,
-		lister:     lister,
-	}, nil
+	}
 }
 
 // Reconcile will create or update the cluster
-func (a *ClusterActuator) Reconcile(cluster *clusterv1.Cluster) (result error) {
+func (a *Actuator) Reconcile(cluster *clusterv1.Cluster) (result error) {
 	ctx, err := context.NewClusterContext(&context.ClusterContextParams{
 		Cluster:    cluster,
 		Client:     a.client,
 		CoreClient: a.coreClient,
-		Lister:     a.lister,
 		Logger:     klogr.New().WithName("[cluster-actuator]"),
 	})
 	if err != nil {
@@ -73,7 +68,7 @@ func (a *ClusterActuator) Reconcile(cluster *clusterv1.Cluster) (result error) {
 	}()
 
 	ctx.Logger.V(2).Info("reconciling cluster")
-	defer ctx.Patch(vsphereutils.GetControlPlaneStatus)
+	defer ctx.Patch(utils.GetControlPlaneStatus)
 
 	// Ensure the PKI config is present or generated and then set the updated
 	// clusterConfig back onto the cluster.
@@ -85,12 +80,11 @@ func (a *ClusterActuator) Reconcile(cluster *clusterv1.Cluster) (result error) {
 }
 
 // Delete will delete any cluster level resources for the cluster.
-func (a *ClusterActuator) Delete(cluster *clusterv1.Cluster) (result error) {
+func (a *Actuator) Delete(cluster *clusterv1.Cluster) (result error) {
 	ctx, err := context.NewClusterContext(&context.ClusterContextParams{
 		Cluster:    cluster,
 		Client:     a.client,
 		CoreClient: a.coreClient,
-		Lister:     a.lister,
 	})
 	if err != nil {
 		return err
@@ -108,4 +102,31 @@ func (a *ClusterActuator) Delete(cluster *clusterv1.Cluster) (result error) {
 	defer ctx.Patch(nil)
 
 	return nil
+}
+
+// GetIP returns the control plane endpoint for the cluster.
+func (a *Actuator) GetIP(cluster *clusterv1.Cluster, _ *clusterv1.Machine) (string, error) {
+	ctx, err := context.NewClusterContext(&context.ClusterContextParams{
+		Cluster:    cluster,
+		Client:     a.client,
+		CoreClient: a.coreClient,
+	})
+	if err != nil {
+		return "", nil
+	}
+	return utils.GetControlPlaneEndpoint(ctx)
+}
+
+// GetKubeConfig returns the contents of a Kubernetes configuration file that
+// may be used to access the cluster.
+func (a *Actuator) GetKubeConfig(cluster *clusterv1.Cluster, _ *clusterv1.Machine) (string, error) {
+	ctx, err := context.NewClusterContext(&context.ClusterContextParams{
+		Cluster:    cluster,
+		Client:     a.client,
+		CoreClient: a.coreClient,
+	})
+	if err != nil {
+		return "", nil
+	}
+	return utils.GetKubeConfig(ctx)
 }

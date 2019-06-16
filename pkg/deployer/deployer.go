@@ -14,43 +14,33 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package vsphere
+package deployer
 
 import (
-	clustercommon "sigs.k8s.io/cluster-api/pkg/apis/cluster/common"
 	clusterv1 "sigs.k8s.io/cluster-api/pkg/apis/cluster/v1alpha1"
 
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/context"
-	vsphereutils "sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/utils"
+	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/utils"
 )
 
-const ProviderName = "vsphere"
+// Deployer satisfies the ProviderDeployer (https://github.com/kubernetes-sigs/cluster-api/blob/master/cmd/clusterctl/clusterdeployer/clusterdeployer.go) interface.
+type Deployer struct{}
 
-func init() {
-	clustercommon.RegisterClusterProvisioner(ProviderName, &DeploymentClient{})
-}
-
-// Contains vsphere-specific deployment logic
-// that implements ProviderDeployer interface at
-// sigs.k8s.io/cluster-api/cmd/clusterctl/clusterdeployer/clusterdeployer.go
-type DeploymentClient struct{}
-
-func NewDeploymentClient() *DeploymentClient {
-	return &DeploymentClient{}
-}
-
-func (d *DeploymentClient) GetIP(cluster *clusterv1.Cluster, _ *clusterv1.Machine) (string, error) {
+// GetIP returns the control plane endpoint for the cluster.
+func (d Deployer) GetIP(cluster *clusterv1.Cluster, _ *clusterv1.Machine) (string, error) {
 	ctx, err := context.NewClusterContext(&context.ClusterContextParams{Cluster: cluster})
 	if err != nil {
 		return "", err
 	}
-	return vsphereutils.GetControlPlaneEndpoint(ctx)
+	return utils.GetControlPlaneEndpoint(ctx)
 }
 
-func (d *DeploymentClient) GetKubeConfig(cluster *clusterv1.Cluster, _ *clusterv1.Machine) (string, error) {
+// GetKubeConfig returns the contents of a Kubernetes configuration file that
+// may be used to access the cluster.
+func (d Deployer) GetKubeConfig(cluster *clusterv1.Cluster, _ *clusterv1.Machine) (string, error) {
 	ctx, err := context.NewClusterContext(&context.ClusterContextParams{Cluster: cluster})
 	if err != nil {
 		return "", err
 	}
-	return vsphereutils.GetKubeConfig(ctx)
+	return utils.GetKubeConfig(ctx)
 }
