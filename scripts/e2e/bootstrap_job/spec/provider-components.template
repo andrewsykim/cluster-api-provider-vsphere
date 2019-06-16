@@ -2165,7 +2165,7 @@ spec:
         - /manager
         args:
         - -v=6
-        image: gcr.io/k8s-cluster-api/cluster-api-controller:0.1.2
+        image: gcr.io/k8s-cluster-api/cluster-api-controller:0.1.3
         name: manager
         resources:
           limits:
