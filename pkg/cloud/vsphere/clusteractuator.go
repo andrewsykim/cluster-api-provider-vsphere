@@ -21,6 +21,7 @@ import (
 
 	// "k8s.io/apimachinery/pkg/types"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/klog/klogr"
 	clusterv1 "sigs.k8s.io/cluster-api/pkg/apis/cluster/v1alpha1"
 	clusterv1alpha1 "sigs.k8s.io/cluster-api/pkg/client/clientset_generated/clientset/typed/cluster/v1alpha1"
 	v1alpha1 "sigs.k8s.io/cluster-api/pkg/client/informers_generated/externalversions/cluster/v1alpha1"
@@ -58,6 +59,7 @@ func (a *ClusterActuator) Reconcile(cluster *clusterv1.Cluster) (result error) {
 		Client:     a.client,
 		CoreClient: a.coreClient,
 		Lister:     a.lister,
+		Logger:     klogr.New().WithName("[cluster-actuator]"),
 	})
 	if err != nil {
 		return err
