@@ -16,7 +16,19 @@ limitations under the License.
 
 package context
 
+import (
+	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/apis/vsphereproviderconfig/v1alpha1"
+)
+
 const (
 	updateSuccess = "UpdateSuccess"
 	updateFailure = "UpdateFailure"
 )
+
+// KubeContext has the information needed to get a connection to a
+// Kubernetes cluster.
+type KubeContext interface {
+	ClusterName() string
+	ClusterProviderConfig() *v1alpha1.VsphereClusterProviderConfig
+	ControlPlaneEndpoint() (string, error)
+}

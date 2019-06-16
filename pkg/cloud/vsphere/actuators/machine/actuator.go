@@ -31,7 +31,7 @@ import (
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/constants"
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/context"
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/services/govmomi"
-	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/utils"
+	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/services/kubeclient"
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/record"
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/tokens"
 )
@@ -113,14 +113,14 @@ func (a *Actuator) Create(
 	}
 
 	// Join the existing cluster.
-	online, _, _ := utils.GetControlPlaneStatus(ctx.ClusterContext)
+	online, _, _ := kubeclient.GetControlPlaneStatus(ctx.ClusterContext)
 	if !online {
 		ctx.Logger.V(2).Info("unable to join machine to control plane until it is online")
 		return &clustererr.RequeueAfterError{RequeueAfter: time.Minute * 1}
 	}
 
 	// Get a Kubernetes client for the cluster.
-	kubeClient, err := utils.GetKubeClientForCluster(ctx.ClusterContext)
+	kubeClient, err := kubeclient.GetKubeClientForCluster(ctx.ClusterContext)
 	if err != nil {
 		return errors.Wrapf(err, "failed to get kubeclient while creating machine %q", ctx)
 	}

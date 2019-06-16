@@ -20,27 +20,35 @@ import (
 	clusterv1 "sigs.k8s.io/cluster-api/pkg/apis/cluster/v1alpha1"
 
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/context"
-	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/utils"
+	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/services/kubeclient"
 )
 
 // Deployer satisfies the ProviderDeployer (https://github.com/kubernetes-sigs/cluster-api/blob/master/cmd/clusterctl/clusterdeployer/clusterdeployer.go) interface.
 type Deployer struct{}
 
 // GetIP returns the control plane endpoint for the cluster.
-func (d Deployer) GetIP(cluster *clusterv1.Cluster, _ *clusterv1.Machine) (string, error) {
-	ctx, err := context.NewClusterContext(&context.ClusterContextParams{Cluster: cluster})
+func (d Deployer) GetIP(cluster *clusterv1.Cluster, machine *clusterv1.Machine) (string, error) {
+	clusterContext, err := context.NewClusterContext(&context.ClusterContextParams{Cluster: cluster})
 	if err != nil {
 		return "", err
 	}
-	return utils.GetControlPlaneEndpoint(ctx)
+	machineContext, err := context.NewMachineContextFromClusterContext(clusterContext, machine)
+	if err != nil {
+		return "", err
+	}
+	return machineContext.ControlPlaneEndpoint()
 }
 
 // GetKubeConfig returns the contents of a Kubernetes configuration file that
 // may be used to access the cluster.
-func (d Deployer) GetKubeConfig(cluster *clusterv1.Cluster, _ *clusterv1.Machine) (string, error) {
-	ctx, err := context.NewClusterContext(&context.ClusterContextParams{Cluster: cluster})
+func (d Deployer) GetKubeConfig(cluster *clusterv1.Cluster, machine *clusterv1.Machine) (string, error) {
+	clusterContext, err := context.NewClusterContext(&context.ClusterContextParams{Cluster: cluster})
 	if err != nil {
 		return "", err
 	}
-	return utils.GetKubeConfig(ctx)
+	machineContext, err := context.NewMachineContextFromClusterContext(clusterContext, machine)
+	if err != nil {
+		return "", err
+	}
+	return kubeclient.GetKubeConfig(machineContext)
 }

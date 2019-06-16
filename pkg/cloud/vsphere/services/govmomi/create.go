@@ -20,10 +20,12 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
+	"math"
 	"net"
 	"text/template"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	"github.com/vmware/govmomi/find"
 	"github.com/vmware/govmomi/object"
@@ -38,7 +40,6 @@ import (
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/services/certificates"
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/services/kubeadm"
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/services/userdata"
-	vsphereutils "sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/utils"
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/record"
 )
 
@@ -87,7 +88,7 @@ func Create(ctx *context.MachineContext, bootstrapToken string) error {
 	var controlPlaneEndpoint string
 	if bootstrapToken != "" {
 		var err error
-		if controlPlaneEndpoint, err = vsphereutils.GetControlPlaneEndpoint(ctx.ClusterContext); err != nil {
+		if controlPlaneEndpoint, err = ctx.ControlPlaneEndpoint(); err != nil {
 			return errors.Wrapf(err, "unable to get control plane endpoint while creating machine %q", ctx)
 		}
 	}
@@ -101,7 +102,7 @@ func Create(ctx *context.MachineContext, bootstrapToken string) error {
 		if bootstrapToken != "" {
 			ctx.Logger.V(2).Info("allowing a machine to join the control plane")
 
-			bindPort := vsphereutils.GetAPIServerBindPort(ctx.MachineConfig)
+			bindPort := ctx.BindPort()
 
 			kubeadm.SetJoinConfigurationOptions(
 				&ctx.MachineConfig.KubeadmConfiguration.Join,
@@ -379,7 +380,7 @@ func cloneVirtualMachineOnVCenter(ctx *context.MachineContext, userData string) 
 	// the cluster/host info if we want to deploy direct to the cluster/host.
 	var src *object.VirtualMachine
 
-	if vsphereutils.IsValidUUID(ctx.MachineConfig.MachineSpec.VMTemplate) {
+	if isValidUUID(ctx.MachineConfig.MachineSpec.VMTemplate) {
 		ctx.Logger.V(4).Info("trying to resolve the VMTemplate as InstanceUUID", "instance-uuid", ctx.MachineConfig.MachineSpec.VMTemplate)
 
 		tplRef, err := ctx.Session.FindByInstanceUUID(ctx, ctx.MachineConfig.MachineSpec.VMTemplate)
@@ -527,12 +528,12 @@ func cloneVirtualMachineOnVCenter(ctx *context.MachineContext, userData string) 
 	for _, dev := range disks {
 		disk := dev.(*types.VirtualDisk)
 		if newSize, ok := diskMap[disk.DeviceInfo.GetDescription().Label]; ok {
-			if disk.CapacityInBytes > vsphereutils.GiBToByte(newSize) {
+			if disk.CapacityInBytes > giBToByte(newSize) {
 				return errors.New("disk size provided should be more than actual disk size of the template")
 			}
 			ctx.Logger.V(4).Info("resizing the disk", "disk-label", disk.DeviceInfo.GetDescription().Label, "new-size", newSize)
 			diskChange = true
-			disk.CapacityInBytes = vsphereutils.GiBToByte(newSize)
+			disk.CapacityInBytes = giBToByte(newSize)
 			diskspec := &types.VirtualDeviceConfigSpec{}
 			diskspec.Operation = types.VirtualDeviceConfigSpecOperationEdit
 			diskspec.Device = disk
@@ -620,4 +621,20 @@ func getCloudInitMetaData(ctx *context.MachineContext) (string, error) {
 	}
 
 	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
+}
+
+func isValidUUID(str string) bool {
+	_, err := uuid.Parse(str)
+	return err == nil
+}
+
+// byteToGiB returns n/1024^3. The input must be an integer that can be
+// appropriately divisible.
+func byteToGiB(n int64) int64 {
+	return n / int64(math.Pow(1024, 3))
+}
+
+// GiBTgiBToByteoByte returns n*1024^3.
+func giBToByte(n int64) int64 {
+	return int64(n * int64(math.Pow(1024, 3)))
 }

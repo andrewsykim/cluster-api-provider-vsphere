@@ -26,7 +26,7 @@ import (
 
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/context"
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/services/certificates"
-	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/utils"
+	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/cloud/vsphere/services/kubeclient"
 	"sigs.k8s.io/cluster-api-provider-vsphere/pkg/record"
 )
 
@@ -68,7 +68,7 @@ func (a *Actuator) Reconcile(cluster *clusterv1.Cluster) (result error) {
 	}()
 
 	ctx.Logger.V(2).Info("reconciling cluster")
-	defer ctx.Patch(utils.GetControlPlaneStatus)
+	defer ctx.Patch(kubeclient.GetControlPlaneStatus)
 
 	// Ensure the PKI config is present or generated and then set the updated
 	// clusterConfig back onto the cluster.
@@ -105,28 +105,36 @@ func (a *Actuator) Delete(cluster *clusterv1.Cluster) (result error) {
 }
 
 // GetIP returns the control plane endpoint for the cluster.
-func (a *Actuator) GetIP(cluster *clusterv1.Cluster, _ *clusterv1.Machine) (string, error) {
-	ctx, err := context.NewClusterContext(&context.ClusterContextParams{
+func (a *Actuator) GetIP(cluster *clusterv1.Cluster, machine *clusterv1.Machine) (string, error) {
+	clusterContext, err := context.NewClusterContext(&context.ClusterContextParams{
 		Cluster:    cluster,
 		Client:     a.client,
 		CoreClient: a.coreClient,
 	})
 	if err != nil {
-		return "", nil
+		return "", err
 	}
-	return utils.GetControlPlaneEndpoint(ctx)
+	machineContext, err := context.NewMachineContextFromClusterContext(clusterContext, machine)
+	if err != nil {
+		return "", err
+	}
+	return machineContext.ControlPlaneEndpoint()
 }
 
 // GetKubeConfig returns the contents of a Kubernetes configuration file that
 // may be used to access the cluster.
-func (a *Actuator) GetKubeConfig(cluster *clusterv1.Cluster, _ *clusterv1.Machine) (string, error) {
-	ctx, err := context.NewClusterContext(&context.ClusterContextParams{
+func (a *Actuator) GetKubeConfig(cluster *clusterv1.Cluster, machine *clusterv1.Machine) (string, error) {
+	clusterContext, err := context.NewClusterContext(&context.ClusterContextParams{
 		Cluster:    cluster,
 		Client:     a.client,
 		CoreClient: a.coreClient,
 	})
 	if err != nil {
-		return "", nil
+		return "", err
 	}
-	return utils.GetKubeConfig(ctx)
+	machineContext, err := context.NewMachineContextFromClusterContext(clusterContext, machine)
+	if err != nil {
+		return "", err
+	}
+	return kubeclient.GetKubeConfig(machineContext)
 }

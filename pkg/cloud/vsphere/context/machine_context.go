@@ -19,7 +19,9 @@ package context
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"reflect"
+	"strconv"
 
 	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -111,22 +113,69 @@ func NewMachineContext(params *MachineContextParams) (*MachineContext, error) {
 
 // Strings returns ClusterNamespace/ClusterName/MachineName
 func (c *MachineContext) String() string {
+	if c.Machine == nil {
+		return c.ClusterContext.String()
+	}
 	return fmt.Sprintf("%s/%s/%s", c.Cluster.Namespace, c.Cluster.Name, c.Machine.Name)
 }
 
-// Role returns the Machine's role.
+// Role returns the machine's role.
 func (c *MachineContext) Role() MachineRole {
+	if c.Machine == nil {
+		return ""
+	}
 	return GetMachineRole(c.Machine)
 }
 
 // IPAddr returns the machine's IP address.
 func (c *MachineContext) IPAddr() string {
+	if c.Machine == nil {
+		return ""
+	}
 	return c.Machine.Annotations[constants.VmIpAnnotationKey]
+}
+
+// BindPort returns the machine's API bind port.
+func (c *MachineContext) BindPort() int32 {
+	if c.Machine == nil {
+		return constants.DefaultBindPort
+	}
+	bindPort := c.MachineConfig.KubeadmConfiguration.Init.LocalAPIEndpoint.BindPort
+	if cp := c.MachineConfig.KubeadmConfiguration.Join.ControlPlane; cp != nil {
+		if jbp := cp.LocalAPIEndpoint.BindPort; jbp != bindPort {
+			bindPort = jbp
+		}
+	}
+	if bindPort == 0 {
+		bindPort = constants.DefaultBindPort
+	}
+	return bindPort
 }
 
 // IsControlPlaneMember indicates whether a machine has the ControlPlaneRole.
 func (c *MachineContext) IsControlPlaneMember() bool {
 	return c.Role() == ControlPlaneRole
+}
+
+// ControlPlaneEndpoint returns the control plane endpoint for the cluster.
+// This function first attempts to retrieve the control plane endpoint with
+// ClusterContext.ControlPlaneEndpoint.
+// If no endpoint is returned then this machine's IP address is used as the
+// control plane endpoint if the machine is a control plane node.
+// Otherwise an error is returned.
+func (c *MachineContext) ControlPlaneEndpoint() (string, error) {
+
+	if controlPlaneEndpoint, _ := c.ClusterContext.ControlPlaneEndpoint(); controlPlaneEndpoint != "" {
+		return controlPlaneEndpoint, nil
+	}
+
+	ipAddr := c.IPAddr()
+	if ipAddr == "" || !c.IsControlPlaneMember() {
+		return "", errors.New("unable to get control plane endpoint")
+	}
+	controlPlaneEndpoint := net.JoinHostPort(ipAddr, strconv.Itoa(int(c.BindPort())))
+	c.Logger.V(2).Info("got control plane endpoint from machine", "control-plane-endpoint", controlPlaneEndpoint)
+	return controlPlaneEndpoint, nil
 }
 
 // Patch updates the machine on the API server.

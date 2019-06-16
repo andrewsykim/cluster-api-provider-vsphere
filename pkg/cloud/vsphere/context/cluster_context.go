@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"sort"
 	"strconv"
 
 	"github.com/go-logr/logr"
@@ -135,6 +136,16 @@ func (c *ClusterContext) String() string {
 	return fmt.Sprintf("%s/%s", c.Cluster.Namespace, c.Cluster.Name)
 }
 
+// ClusterName returns the name of the cluster.
+func (c *ClusterContext) ClusterName() string {
+	return c.Cluster.Name
+}
+
+// ClusterProviderConfig returns the cluster provider config.
+func (c *ClusterContext) ClusterProviderConfig() *v1alpha1.VsphereClusterProviderConfig {
+	return c.ClusterConfig
+}
+
 // User returns the username used to access the vSphere endpoint.
 func (c *ClusterContext) User() string {
 	return c.user
@@ -161,6 +172,9 @@ func (c *ClusterContext) GetMachineClient() client.MachineInterface {
 
 // GetMachines gets the machines in the cluster.
 func (c *ClusterContext) GetMachines() ([]*clusterv1.Machine, error) {
+	if c.machineClient == nil {
+		return nil, errors.New("machineClient is nil")
+	}
 	labelSet := labels.Set(map[string]string{
 		clusterv1.MachineClusterLabelName: c.Cluster.Name,
 	})
@@ -190,9 +204,80 @@ func (c *ClusterContext) GetControlPlaneMachines() ([]*clusterv1.Machine, error)
 	return controlPlaneMachines, nil
 }
 
+// byMachineCreatedTimestamp implements sort.Interface for []clusterv1.Machine
+// based on the machine's creation timestamp.
+type byMachineCreatedTimestamp []*clusterv1.Machine
+
+func (a byMachineCreatedTimestamp) Len() int      { return len(a) }
+func (a byMachineCreatedTimestamp) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
+func (a byMachineCreatedTimestamp) Less(i, j int) bool {
+	return a[i].CreationTimestamp.Before(&a[j].CreationTimestamp)
+}
+
+// FirstControlPlaneMachine returns the first control plane machine according
+// to the machines' CreationTimestamp property.
+func (c *ClusterContext) FirstControlPlaneMachine() (*clusterv1.Machine, error) {
+	controlPlaneMachines, err := c.GetControlPlaneMachines()
+	if err != nil {
+		return nil, errors.Wrap(err, "getting getting control plane machines")
+	}
+	if len(controlPlaneMachines) == 0 {
+		return nil, nil
+	}
+
+	// Sort the control plane machines so the first one created is always the
+	// one used to provide the address for the control plane endpoint.
+	sortedControlPlaneMachines := byMachineCreatedTimestamp(controlPlaneMachines)
+	sort.Sort(sortedControlPlaneMachines)
+
+	return sortedControlPlaneMachines[0], nil
+}
+
+// ControlPlaneEndpoint returns the control plane endpoint for the cluster.
+// If a control plane endpoint was specified in the cluster configuration, then
+// that value will be returned.
+// Otherwise this function will return the endpoint of the first control plane
+// node in the cluster that reports an IP address.
+// If no control plane nodes have reported an IP address then this function
+// returns an error.
+func (c *ClusterContext) ControlPlaneEndpoint() (string, error) {
+	if len(c.Cluster.Status.APIEndpoints) > 0 {
+		controlPlaneEndpoint := net.JoinHostPort(c.Cluster.Status.APIEndpoints[0].Host, strconv.Itoa(c.Cluster.Status.APIEndpoints[0].Port))
+		c.Logger.V(2).Info("got control plane endpoint from cluster APIEndpoints", "control-plane-endpoint", controlPlaneEndpoint)
+		return controlPlaneEndpoint, nil
+	}
+
+	if controlPlaneEndpoint := c.ClusterConfig.ClusterConfiguration.ControlPlaneEndpoint; controlPlaneEndpoint != "" {
+		c.Logger.V(2).Info("got control plane endpoint from cluster config", "control-plane-endpoint", controlPlaneEndpoint)
+		return controlPlaneEndpoint, nil
+	}
+
+	machine, err := c.FirstControlPlaneMachine()
+	if err != nil {
+		return "", errors.Wrap(err, "error getting first control plane machine while searching for control plane endpoint")
+	}
+
+	if machine == nil {
+		return "", errors.New("cluster does not yet have a control plane machine")
+	}
+
+	machineCtx, err := NewMachineContextFromClusterContext(c, machine)
+	if err != nil {
+		return "", errors.Wrap(err, "error creating machine context while searching for control plane endpoint")
+	}
+
+	if ipAddr := machineCtx.IPAddr(); ipAddr != "" {
+		controlPlaneEndpoint := net.JoinHostPort(ipAddr, strconv.Itoa(int(machineCtx.BindPort())))
+		machineCtx.Logger.V(2).Info("got control plane endpoint from machine", "control-plane-endpoint", controlPlaneEndpoint)
+		return controlPlaneEndpoint, nil
+	}
+
+	return "", errors.New("unable to get control plane endpoint")
+}
+
 // GetControlPlaneStatusFunc returns a flag indicating whether the control plane
 // is online. If true, the control plane's endpoint will also be returned.
-type GetControlPlaneStatusFunc func(ctx *ClusterContext) (online bool, controlPlaneEndpoint string, err error)
+type GetControlPlaneStatusFunc func(ctx KubeContext) (online bool, controlPlaneEndpoint string, err error)
 
 // Patch updates the cluster on the API server.
 func (c *ClusterContext) Patch(getControlPlaneStatus GetControlPlaneStatusFunc) error {
@@ -278,6 +363,6 @@ func (c *ClusterContext) Patch(getControlPlaneStatus GetControlPlaneStatusFunc) 
 	return nil
 }
 
-func controlPlaneOffline(ctx *ClusterContext) (bool, string, error) {
+func controlPlaneOffline(ctx KubeContext) (bool, string, error) {
 	return false, "", nil
 }
