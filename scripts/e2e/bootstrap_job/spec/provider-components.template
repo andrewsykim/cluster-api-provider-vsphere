@@ -2161,11 +2161,10 @@ spec:
         controller-tools.k8s.io: "1.0"
     spec:
       containers:
-      - args:
-        - --logtostderr
-        - -v=6
-        command:
+      - command:
         - /manager
+        args:
+        - -v=6
         image: gcr.io/k8s-cluster-api/cluster-api-controller:0.1.2
         name: manager
         resources:
