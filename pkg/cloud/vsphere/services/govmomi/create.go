@@ -128,6 +128,7 @@ func Create(ctx *context.MachineContext, bootstrapToken string) error {
 			}
 
 			userData, err := userdata.JoinControlPlane(&userdata.ContolPlaneJoinInput{
+				SSHAuthorizedKeys: ctx.ClusterConfig.SSHAuthorizedKeys,
 				CACert:            string(ctx.ClusterConfig.CAKeyPair.Cert),
 				CAKey:             string(ctx.ClusterConfig.CAKeyPair.Key),
 				EtcdCACert:        string(ctx.ClusterConfig.EtcdCAKeyPair.Cert),
@@ -197,6 +198,7 @@ func Create(ctx *context.MachineContext, bootstrapToken string) error {
 			}
 
 			userData, err := userdata.NewControlPlane(&userdata.ControlPlaneInput{
+				SSHAuthorizedKeys:    ctx.ClusterConfig.SSHAuthorizedKeys,
 				CACert:               string(ctx.ClusterConfig.CAKeyPair.Cert),
 				CAKey:                string(ctx.ClusterConfig.CAKeyPair.Key),
 				EtcdCACert:           string(ctx.ClusterConfig.EtcdCAKeyPair.Cert),
@@ -243,6 +245,7 @@ func Create(ctx *context.MachineContext, bootstrapToken string) error {
 		}
 
 		userData, err := userdata.NewNode(&userdata.NodeInput{
+			SSHAuthorizedKeys: ctx.ClusterConfig.SSHAuthorizedKeys,
 			JoinConfiguration: joinConfigurationYAML,
 		})
 		if err != nil {
